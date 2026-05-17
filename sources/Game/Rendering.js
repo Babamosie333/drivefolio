@@ -35,21 +35,39 @@ export class Rendering
         })
     }
 
+    // Detect browser
+    isSafari()
+    {
+        return /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
+    }
+
+    isFirefox()
+    {
+        return navigator.userAgent.toLowerCase().includes('firefox')
+    }
+
     async setRenderer()
     {
+        // Force WebGL for Safari and Firefox since WebGPU is unstable
+        const forceWebGL = this.isSafari() || this.isFirefox()
+
+        if(forceWebGL)
+            console.log('Rendering: WebGPU not supported in this browser, falling back to WebGL')
+        else
+            console.log('Rendering: Using WebGPU')
+
         this.renderer = new THREE.WebGPURenderer({
             canvas: this.game.canvasElement,
             powerPreference: 'high-performance',
-            forceWebGL: false,
+            forceWebGL: forceWebGL,
             antialias: this.game.viewport.pixelRatio < 2
         })
+
         this.renderer.setSize(this.game.viewport.width, this.game.viewport.height)
         this.renderer.setPixelRatio(this.game.viewport.pixelRatio)
         this.renderer.sortObjects = false
-
         this.renderer.domElement.classList.add('experience')
         this.renderer.shadowMap.enabled = true
-        // this.renderer.shadowMap.type = THREE.PCFSoftShadowMap
         this.renderer.setOpaqueSort((a, b) =>
         {
             return a.renderOrder - b.renderOrder
@@ -64,11 +82,9 @@ export class Rendering
             this.renderer.inspector = new Inspector()
         }
 
-        // Make the renderer control the ticker
         this.renderer.setAnimationLoop((elapsedTime) => { this.game.ticker.update(elapsedTime) })
 
-        return this.renderer
-            .init()
+        return this.renderer.init()
     }
 
     setPostprocessing()
@@ -86,7 +102,6 @@ export class Rendering
 
         this.cheapDOFPass = cheapDOF(renderOutput(scenePass))
 
-        // Quality
         const qualityChange = (level) =>
         {
             if(level === 0)
@@ -103,7 +118,6 @@ export class Rendering
         qualityChange(this.game.quality.level)
         this.game.quality.events.on('change', qualityChange)
 
-        // Debug
         if(this.game.debug.active)
         {
             const bloomPanel = this.debugPanel.addFolder({
@@ -123,8 +137,6 @@ export class Rendering
 
             blurPanel.addBinding(this.cheapDOFPass.start, 'value', { label: 'start', min: 0, max: 0.5, step: 0.001 })
             blurPanel.addBinding(this.cheapDOFPass.end, 'value', { label: 'end', min: 0, max: 0.5, step: 0.001 })
-            // blurPanel.addBinding(this.cheapDOFPass.size, 'value', { label: 'size', min: 1, max: 5, step: 1 })
-            // blurPanel.addBinding(this.cheapDOFPass.separation, 'value', { label: 'separation', min: 0, max: 5, step: 0.001 })
             blurPanel.addBinding(this.cheapDOFPass.repeats, 'value', { label: 'repeats', min: 1, max: 100, step: 1 })
             blurPanel.addBinding(this.cheapDOFPass.amount, 'value', { label: 'amount', min: 0, max: 0.02, step: 0.0001 })
         }
@@ -134,7 +146,7 @@ export class Rendering
     {
         if(!location.hash.match(/stats/i))
             return
-            
+
         this.stats = {}
         this.stats.feed = {}
         this.stats.update = () =>
@@ -147,10 +159,9 @@ export class Rendering
 
         this.stats.update()
 
-        // Debug
         if(this.game.debug.active)
         {
-             const debugPanel = this.debugPanel.addFolder({
+            const debugPanel = this.debugPanel.addFolder({
                 title: 'Stats',
                 expanded: true,
             })
@@ -170,7 +181,6 @@ export class Rendering
 
     async render()
     {
-        // this.renderer.render(this.game.scene, this.game.view.camera)
         this.postProcessing.render()
 
         if(this.stats)
