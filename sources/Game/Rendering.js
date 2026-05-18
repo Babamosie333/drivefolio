@@ -54,42 +54,27 @@ export class Rendering
     }
 
     async setRenderer()
-    {
-        const webGPUSupported = await this.isWebGPUSupported()
-        this.isWebGL = !webGPUSupported
+{
+    this.isWebGL = true
 
-        console.log(`Rendering: Using ${this.isWebGL ? 'WebGL' : 'WebGPU'}`)
+    this.renderer = new THREE.WebGPURenderer({
+        canvas: this.game.canvasElement,
+        powerPreference: 'high-performance',
+        forceWebGL: true,
+        antialias: this.game.viewport.pixelRatio < 2
+    })
 
-        this.renderer = new THREE.WebGPURenderer({
-            canvas: this.game.canvasElement,
-            powerPreference: 'high-performance',
-            forceWebGL: this.isWebGL,
-            antialias: this.game.viewport.pixelRatio < 2
-        })
+    this.renderer.setSize(this.game.viewport.width, this.game.viewport.height)
+    this.renderer.setPixelRatio(Math.min(this.game.viewport.pixelRatio, 2))
+    this.renderer.sortObjects = false
+    this.renderer.domElement.classList.add('experience')
+    this.renderer.shadowMap.enabled = true
+    this.renderer.setOpaqueSort((a, b) => { return a.renderOrder - b.renderOrder })
+    this.renderer.setTransparentSort((a, b) => { return a.renderOrder - b.renderOrder })
+    this.renderer.setAnimationLoop((elapsedTime) => { this.game.ticker.update(elapsedTime) })
 
-        this.renderer.setSize(this.game.viewport.width, this.game.viewport.height)
-        this.renderer.setPixelRatio(Math.min(this.game.viewport.pixelRatio, 2)) // Cap pixel ratio at 2 to reduce lag
-        this.renderer.sortObjects = false
-        this.renderer.domElement.classList.add('experience')
-        this.renderer.shadowMap.enabled = true
-        this.renderer.setOpaqueSort((a, b) =>
-        {
-            return a.renderOrder - b.renderOrder
-        })
-        this.renderer.setTransparentSort((a, b) =>
-        {
-            return a.renderOrder - b.renderOrder
-        })
-
-        if(location.hash.match(/inspector/i))
-        {
-            this.renderer.inspector = new Inspector()
-        }
-
-        this.renderer.setAnimationLoop((elapsedTime) => { this.game.ticker.update(elapsedTime) })
-
-        return this.renderer.init()
-    }
+    return this.renderer.init()
+}
 
     setPostprocessing()
     {
