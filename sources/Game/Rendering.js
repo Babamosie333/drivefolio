@@ -1,5 +1,5 @@
 import * as THREE from 'three/webgpu'
-import { pass, mrt, output, emissive, renderOutput, vec4 } from 'three/tsl'
+import { pass, renderOutput } from 'three/tsl'
 import { bloom } from 'three/addons/tsl/display/BloomNode.js'
 import { Game } from './Game.js'
 import { cheapDOF } from './Passes/cheapDOF.js'
@@ -10,6 +10,7 @@ export class Rendering
     constructor()
     {
         this.game = Game.getInstance()
+        this.isWebGL = false
 
         if(this.game.debug.active)
         {
@@ -35,22 +36,15 @@ export class Rendering
         })
     }
 
-    // Check if WebGPU is truly supported
     async isWebGPUSupported()
     {
         try
         {
-            if(!navigator.gpu)
-                return false
-
+            if(!navigator.gpu) return false
             const adapter = await navigator.gpu.requestAdapter()
-            if(!adapter)
-                return false
-
+            if(!adapter) return false
             const device = await adapter.requestDevice()
-            if(!device)
-                return false
-
+            if(!device) return false
             return true
         }
         catch(e)
@@ -61,21 +55,20 @@ export class Rendering
 
     async setRenderer()
     {
-        // Actually test WebGPU availability instead of guessing by browser
         const webGPUSupported = await this.isWebGPUSupported()
-        const forceWebGL = !webGPUSupported
+        this.isWebGL = !webGPUSupported
 
-        console.log(`Rendering: ${forceWebGL ? 'WebGL' : 'WebGPU'} mode`)
+        console.log(`Rendering: Using ${this.isWebGL ? 'WebGL' : 'WebGPU'}`)
 
         this.renderer = new THREE.WebGPURenderer({
             canvas: this.game.canvasElement,
             powerPreference: 'high-performance',
-            forceWebGL: forceWebGL,
+            forceWebGL: this.isWebGL,
             antialias: this.game.viewport.pixelRatio < 2
         })
 
         this.renderer.setSize(this.game.viewport.width, this.game.viewport.height)
-        this.renderer.setPixelRatio(this.game.viewport.pixelRatio)
+        this.renderer.setPixelRatio(Math.min(this.game.viewport.pixelRatio, 2)) // Cap pixel ratio at 2 to reduce lag
         this.renderer.sortObjects = false
         this.renderer.domElement.classList.add('experience')
         this.renderer.shadowMap.enabled = true
@@ -106,16 +99,29 @@ export class Rendering
         const scenePassColor = scenePass.getTextureNode('output')
 
         this.bloomPass = bloom(scenePassColor)
-        this.bloomPass._nMips = this.game.quality.level === 0 ? 5 : 2
+
+        // Reduce bloom quality on WebGL to improve performance
+        this.bloomPass._nMips = this.isWebGL ? 3 : (this.game.quality.level === 0 ? 5 : 2)
         this.bloomPass.threshold.value = 1
-        this.bloomPass.strength.value = 0.25
+        this.bloomPass.strength.value = this.isWebGL ? 0.15 : 0.25 // Lighter bloom on WebGL
         this.bloomPass.smoothWidth.value = 1
 
         this.cheapDOFPass = cheapDOF(renderOutput(scenePass))
 
+        // Disable DOF on WebGL for better performance
+        if(this.isWebGL)
+        {
+            this.cheapDOFPass.amount.value = 0
+        }
+
         const qualityChange = (level) =>
         {
-            if(level === 0)
+            if(this.isWebGL)
+            {
+                // On WebGL always use simple pipeline for performance
+                this.postProcessing.outputNode = scenePassColor.add(this.bloomPass)
+            }
+            else if(level === 0)
             {
                 this.postProcessing.outputNode = this.cheapDOFPass.add(this.bloomPass)
             }
@@ -126,6 +132,7 @@ export class Rendering
 
             this.postProcessing.needsUpdate = true
         }
+
         qualityChange(this.game.quality.level)
         this.game.quality.events.on('change', qualityChange)
 
@@ -135,7 +142,6 @@ export class Rendering
                 title: 'bloom',
                 expanded: false,
             })
-
             bloomPanel.addBinding(this.bloomPass.threshold, 'value', { label: 'threshold', min: 0, max: 2, step: 0.01 })
             bloomPanel.addBinding(this.bloomPass.strength, 'value', { label: 'strength', min: 0, max: 3, step: 0.01 })
             bloomPanel.addBinding(this.bloomPass.radius, 'value', { label: 'radius', min: 0, max: 1, step: 0.01 })
@@ -145,7 +151,6 @@ export class Rendering
                 title: 'blur',
                 expanded: true,
             })
-
             blurPanel.addBinding(this.cheapDOFPass.start, 'value', { label: 'start', min: 0, max: 0.5, step: 0.001 })
             blurPanel.addBinding(this.cheapDOFPass.end, 'value', { label: 'end', min: 0, max: 0.5, step: 0.001 })
             blurPanel.addBinding(this.cheapDOFPass.repeats, 'value', { label: 'repeats', min: 1, max: 100, step: 1 })
@@ -176,7 +181,6 @@ export class Rendering
                 title: 'Stats',
                 expanded: true,
             })
-
             for(const feedName in this.stats.feed)
             {
                 debugPanel.addBinding(this.stats.feed, feedName, { readonly: true })
@@ -187,7 +191,7 @@ export class Rendering
     resize()
     {
         this.renderer.setSize(this.game.viewport.width, this.game.viewport.height)
-        this.renderer.setPixelRatio(this.game.viewport.pixelRatio)
+        this.renderer.setPixelRatio(Math.min(this.game.viewport.pixelRatio, 2))
     }
 
     async render()

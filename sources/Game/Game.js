@@ -200,8 +200,8 @@ export class Game
         this.overlay = new Overlay()
 
         // Pre-render if quality high
-        if(this.quality.level === 0 && this.rendering.renderer.backend.isWebGPUBackend)
-            PreRenderer.render()
+       if(this.quality.level === 0 && !this.rendering.isWebGL)
+        PreRenderer.render()
 
         this.ticker.wait(3, () =>
         {
