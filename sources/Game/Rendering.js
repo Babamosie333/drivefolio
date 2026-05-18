@@ -10,7 +10,9 @@ export class Rendering
     constructor()
     {
         this.game = Game.getInstance()
-        this.isWebGL = false
+        this.isWebGL = true
+        this.isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
+        this.isLowEnd = this.detectLowEndDevice()
 
         if(this.game.debug.active)
         {
@@ -19,6 +21,14 @@ export class Rendering
                 expanded: false,
             })
         }
+    }
+
+    detectLowEndDevice()
+    {
+        // Detect low end by cores and memory
+        const cores = navigator.hardwareConcurrency || 2
+        const memory = navigator.deviceMemory || 2
+        return cores <= 4 || memory <= 4
     }
 
     start()
@@ -36,45 +46,53 @@ export class Rendering
         })
     }
 
-    async isWebGPUSupported()
-    {
-        try
-        {
-            if(!navigator.gpu) return false
-            const adapter = await navigator.gpu.requestAdapter()
-            if(!adapter) return false
-            const device = await adapter.requestDevice()
-            if(!device) return false
-            return true
-        }
-        catch(e)
-        {
-            return false
-        }
-    }
-
     async setRenderer()
-{
-    this.isWebGL = true
+    {
+        this.isWebGL = true
 
-    this.renderer = new THREE.WebGPURenderer({
-        canvas: this.game.canvasElement,
-        powerPreference: 'high-performance',
-        forceWebGL: true,
-        antialias: this.game.viewport.pixelRatio < 2
-    })
+        // Pixel ratio settings based on device
+        let pixelRatio = window.devicePixelRatio || 1
+        if(this.isMobile)
+            pixelRatio = Math.min(pixelRatio, 1.5) // Cap mobile at 1.5
+        else if(this.isLowEnd)
+            pixelRatio = Math.min(pixelRatio, 1)   // Cap low end at 1
+        else
+            pixelRatio = Math.min(pixelRatio, 2)   // Cap desktop at 2
 
-    this.renderer.setSize(this.game.viewport.width, this.game.viewport.height)
-    this.renderer.setPixelRatio(Math.min(this.game.viewport.pixelRatio, 2))
-    this.renderer.sortObjects = false
-    this.renderer.domElement.classList.add('experience')
-    this.renderer.shadowMap.enabled = true
-    this.renderer.setOpaqueSort((a, b) => { return a.renderOrder - b.renderOrder })
-    this.renderer.setTransparentSort((a, b) => { return a.renderOrder - b.renderOrder })
-    this.renderer.setAnimationLoop((elapsedTime) => { this.game.ticker.update(elapsedTime) })
+        this.targetPixelRatio = pixelRatio
 
-    return this.renderer.init()
-}
+        console.log(`Rendering: WebGL | Mobile: ${this.isMobile} | LowEnd: ${this.isLowEnd} | PixelRatio: ${pixelRatio}`)
+
+        this.renderer = new THREE.WebGPURenderer({
+            canvas: this.game.canvasElement,
+            powerPreference: this.isLowEnd ? 'low-power' : 'high-performance',
+            forceWebGL: true,
+            antialias: !this.isMobile && pixelRatio < 2
+        })
+
+        this.renderer.setSize(this.game.viewport.width, this.game.viewport.height)
+        this.renderer.setPixelRatio(this.targetPixelRatio)
+        this.renderer.sortObjects = false
+        this.renderer.domElement.classList.add('experience')
+        this.renderer.shadowMap.enabled = !this.isMobile // Disable shadows on mobile
+        this.renderer.setOpaqueSort((a, b) =>
+        {
+            return a.renderOrder - b.renderOrder
+        })
+        this.renderer.setTransparentSort((a, b) =>
+        {
+            return a.renderOrder - b.renderOrder
+        })
+
+        if(location.hash.match(/inspector/i))
+        {
+            this.renderer.inspector = new Inspector()
+        }
+
+        this.renderer.setAnimationLoop((elapsedTime) => { this.game.ticker.update(elapsedTime) })
+
+        return this.renderer.init()
+    }
 
     setPostprocessing()
     {
@@ -85,32 +103,51 @@ export class Rendering
 
         this.bloomPass = bloom(scenePassColor)
 
-        // Reduce bloom quality on WebGL to improve performance
-        this.bloomPass._nMips = this.isWebGL ? 3 : (this.game.quality.level === 0 ? 5 : 2)
-        this.bloomPass.threshold.value = 1
-        this.bloomPass.strength.value = this.isWebGL ? 0.15 : 0.25 // Lighter bloom on WebGL
-        this.bloomPass.smoothWidth.value = 1
+        // Aggressive optimization based on device
+        if(this.isMobile)
+        {
+            // Mobile - minimal settings
+            this.bloomPass._nMips = 2
+            this.bloomPass.threshold.value = 1.2
+            this.bloomPass.strength.value = 0.1
+            this.bloomPass.smoothWidth.value = 0.5
+        }
+        else if(this.isLowEnd)
+        {
+            // Low end PC - reduced settings
+            this.bloomPass._nMips = 3
+            this.bloomPass.threshold.value = 1
+            this.bloomPass.strength.value = 0.15
+            this.bloomPass.smoothWidth.value = 1
+        }
+        else
+        {
+            // Normal PC
+            this.bloomPass._nMips = this.game.quality.level === 0 ? 5 : 2
+            this.bloomPass.threshold.value = 1
+            this.bloomPass.strength.value = 0.25
+            this.bloomPass.smoothWidth.value = 1
+        }
 
         this.cheapDOFPass = cheapDOF(renderOutput(scenePass))
 
-        // Disable DOF on WebGL for better performance
-        if(this.isWebGL)
-        {
+        // Disable DOF on mobile and low end
+        if(this.isMobile || this.isLowEnd)
             this.cheapDOFPass.amount.value = 0
-        }
 
         const qualityChange = (level) =>
         {
-            if(this.isWebGL)
+            // Always simple pipeline on WebGL
+            if(this.isMobile || this.isLowEnd)
             {
-                // On WebGL always use simple pipeline for performance
+                // Minimal pipeline for weak devices
                 this.postProcessing.outputNode = scenePassColor.add(this.bloomPass)
             }
             else if(level === 0)
             {
                 this.postProcessing.outputNode = this.cheapDOFPass.add(this.bloomPass)
             }
-            else if(level === 1)
+            else
             {
                 this.postProcessing.outputNode = scenePassColor.add(this.bloomPass)
             }
@@ -176,7 +213,7 @@ export class Rendering
     resize()
     {
         this.renderer.setSize(this.game.viewport.width, this.game.viewport.height)
-        this.renderer.setPixelRatio(Math.min(this.game.viewport.pixelRatio, 2))
+        this.renderer.setPixelRatio(this.targetPixelRatio)
     }
 
     async render()
