@@ -35,26 +35,37 @@ export class Rendering
         })
     }
 
-    // Detect browser
-    isSafari()
+    // Check if WebGPU is truly supported
+    async isWebGPUSupported()
     {
-        return /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
-    }
+        try
+        {
+            if(!navigator.gpu)
+                return false
 
-    isFirefox()
-    {
-        return navigator.userAgent.toLowerCase().includes('firefox')
+            const adapter = await navigator.gpu.requestAdapter()
+            if(!adapter)
+                return false
+
+            const device = await adapter.requestDevice()
+            if(!device)
+                return false
+
+            return true
+        }
+        catch(e)
+        {
+            return false
+        }
     }
 
     async setRenderer()
     {
-        // Force WebGL for Safari and Firefox since WebGPU is unstable
-        const forceWebGL = this.isSafari() || this.isFirefox()
+        // Actually test WebGPU availability instead of guessing by browser
+        const webGPUSupported = await this.isWebGPUSupported()
+        const forceWebGL = !webGPUSupported
 
-        if(forceWebGL)
-            console.log('Rendering: WebGPU not supported in this browser, falling back to WebGL')
-        else
-            console.log('Rendering: Using WebGPU')
+        console.log(`Rendering: ${forceWebGL ? 'WebGL' : 'WebGPU'} mode`)
 
         this.renderer = new THREE.WebGPURenderer({
             canvas: this.game.canvasElement,
