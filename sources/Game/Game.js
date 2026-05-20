@@ -54,6 +54,8 @@ export class Game
     static getInstance()
     {
         return Game.instance
+        
+
     }
 
     constructor()
@@ -63,6 +65,7 @@ export class Game
             return Game.instance
 
         Game.instance = this
+        window.__game = this  // ← add this line
 
         this.init()
     }
